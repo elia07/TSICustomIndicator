@@ -1,0 +1,195 @@
+//@version=5
+//Developer: Alireza Nabati
+indicator('TSICustom', overlay=true,max_bars_back=1440)
+//Globals
+
+
+//Inputs
+atrPeriod = input(10, 'ATR Length')
+factor = input(3, 'Factor')
+tsi30MinTreshould=input(40)
+tsi1HTreshould=input(50)
+tsi4HTreshould=input(70)
+showHeikenAshi=input(true)
+
+min30Offset=0
+h1Offset=0
+h4Offset=0
+
+if(timeframe.period=='30')
+    min30Offset:=1
+    h1Offset:=2
+    h4Offset:=4
+else if(timeframe.period=='60')
+    h1Offset:=1
+    h4Offset:=2
+else if(timeframe.period=='240')
+    h4Offset:=1
+
+//Function
+
+
+
+
+//Current Period HA
+ha_t = ticker.heikinashi(syminfo.tickerid)
+ha_open = request.security(ha_t, timeframe.period, open)
+ha_high = request.security(ha_t, timeframe.period, high)
+ha_low = request.security(ha_t, timeframe.period, low)
+ha_close = request.security(ha_t, timeframe.period, close)
+ha_palette = ha_close >= ha_open ? color.green : color.red
+
+ha1H_t = ticker.heikinashi(syminfo.tickerid)
+ha1H_open = request.security(ha1H_t, '60', open)
+ha1H_high = request.security(ha1H_t, '60', high)
+ha1H_low = request.security(ha1H_t, '60', low)
+ha1H_close = request.security(ha1H_t, '60', close)
+ha1H_palette = ha1H_close >= ha1H_open ? color.green : color.red
+
+ha4H_t = ticker.heikinashi(syminfo.tickerid)
+ha4H_open = request.security(ha4H_t, '60', open)
+ha4H_high = request.security(ha4H_t, '60', high)
+ha4H_low = request.security(ha4H_t, '60', low)
+ha4H_close = request.security(ha4H_t, '60', close)
+ha4H_palette = ha4H_close >= ha4H_open ? color.green : color.red
+
+
+//plotchar(bar_index, "Bar Index", txt, location = location.top)
+
+//Functions
+HA_sma(x, y) =>
+    sum = 0.0
+    for i = 0 to y - 1
+        sum := sum + x[i] / y
+    sum
+
+HA_rma(src, length) =>
+	alpha = 1/length
+	sum = 0.0
+	haSma= HA_sma(src, length)
+	sum := na(sum[1]) ? haSma : alpha * src + (1 - alpha) * nz(sum[1])
+
+HA_atr(length) =>
+    trueRange = na(ha_high[1])? ha_high-ha_low : math.max(math.max(ha_high - ha_low, math.abs(ha_high - ha_close[1])), math.abs(ha_low - ha_close[1]))
+    //true range can be also calculated with ta.tr(true)
+    HA_rma(trueRange, length)
+
+HA_supertrend(factor, atrPeriod) =>
+	src = (ha_high+ha_low)/2
+	atr = HA_atr(atrPeriod)
+	upperBand = src + factor * atr
+	lowerBand = src - factor * atr
+	prevLowerBand = nz(lowerBand[1])
+	prevUpperBand = nz(upperBand[1])
+
+	lowerBand := lowerBand > prevLowerBand or ha_close[1] < prevLowerBand ? lowerBand : prevLowerBand
+	upperBand := upperBand < prevUpperBand or ha_close[1] > prevUpperBand ? upperBand : prevUpperBand
+	int direction = na
+	float superTrend = na
+	prevSuperTrend = superTrend[1]
+	if na(atr[1])
+		direction := 1
+	else if prevSuperTrend == prevUpperBand
+		direction := ha_close > upperBand ? -1 : 1
+	else
+		direction := ha_close < lowerBand ? 1 : -1
+	superTrend := direction == -1 ? lowerBand : upperBand
+	[superTrend, direction]
+
+double_smooth(src, long, short) =>
+	fist_smooth = ta.ema(src, long)
+	ta.ema(fist_smooth, short)
+
+HA_Tsi(short,long,signal)=>
+    price = ha_close
+    pc = ta.change(price)
+    double_smoothed_pc = double_smooth(pc, long, short)
+    double_smoothed_abs_pc = double_smooth(math.abs(pc), long, short)
+    tsi_value = 100 * (double_smoothed_pc / double_smoothed_abs_pc)
+    tsi_signal=ta.ema(tsi_value, signal)
+    [tsi_value,tsi_signal]
+
+HA1H_Tsi(short,long,signal)=>
+    price = ha1H_close
+    pc = ta.change(price)
+    double_smoothed_pc = double_smooth(pc, long, short)
+    double_smoothed_abs_pc = double_smooth(math.abs(pc), long, short)
+    tsi_value = 100 * (double_smoothed_pc / double_smoothed_abs_pc)
+    tsi_signal=ta.ema(tsi_value, signal)
+    [tsi_value,tsi_signal]
+
+HA4H_Tsi(short,long,signal)=>
+    price = ha4H_close
+    pc = ta.change(price)
+    double_smoothed_pc = double_smooth(pc, long, short)
+    double_smoothed_abs_pc = double_smooth(math.abs(pc), long, short)
+    tsi_value = 100 * (double_smoothed_pc / double_smoothed_abs_pc)
+    tsi_signal=ta.ema(tsi_value, signal)
+    [tsi_value,tsi_signal]
+
+[supertrend, supertrendDirection] = HA_supertrend(factor, atrPeriod)
+
+[tsiH1_value, tsiH1_signal] = request.security(syminfo.tickerid, "60", HA4H_Tsi(3,7,4), lookahead=barmerge.lookahead_on)
+[tsiH4_value, tsiH4_signal] = request.security(syminfo.tickerid, "240", HA4H_Tsi(3,7,4), lookahead=barmerge.lookahead_on)
+[tsi_value, tsi_signal] = HA_Tsi(3,7,4)
+//[supertrend, supertrendDirection] = request.security(syminfo.tickerid, "D", HA_supertrend(factor, atrPeriod), lookahead=barmerge.lookahead_on)
+//request.security(syminfo.tickerid, "1D", HA_supertrend(factor, atrPeriod), lookahead=barmerge.lookahead_on)
+
+//needTrade() => close > open and open > close[1] ? 1 : close < open and open < close[1] ? -1 : 0
+//HACandle = request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, needTrade())
+
+
+
+
+
+
+//label.new(bar_index, high, str.tostring(supertrendDirection))
+tsiCrossOver= ta.crossover(tsi_value,tsi_signal)
+tsiCrossUnder= ta.crossunder(tsi_value,tsi_signal)
+if((timeframe.period=='30') and ((tsiCrossOver and tsi_value[1]<=(-1*tsi30MinTreshould)) or (tsiCrossUnder and tsi_value[1]>=tsi30MinTreshould)))
+    line.new(bar_index+min30Offset, close, bar_index+min30Offset, close * 1.01, extend = extend.both,color=color.blue)
+
+plotshape((timeframe.period=='30') and tsiCrossOver and tsi_value[1]<=(-1*tsi30MinTreshould) , style=shape.labelup,color=color.green,location=location.belowbar,offset=min30Offset)
+plotshape((timeframe.period=='30') and tsiCrossUnder and tsi_value[1]>=tsi30MinTreshould , style=shape.labeldown,color=color.red,location=location.abovebar,offset=min30Offset)
+
+tsiCrossOverH1= ta.crossover(tsiH1_value,tsiH1_signal)
+tsiCrossUnderH1= ta.crossunder(tsiH1_value,tsiH1_signal)
+if((tsiCrossOverH1 and tsi_value[1]<=(-1*tsi1HTreshould)) or (tsiCrossUnderH1 and tsi_value[1]>=tsi1HTreshould))
+    line.new(bar_index+h1Offset, close, bar_index+h1Offset, close * 1.01, extend = extend.both,color=color.red)
+plotshape(tsiCrossOverH1 and tsi_value[1]<=(-1*tsi1HTreshould) , style=shape.triangleup,color=color.green,location=location.belowbar,offset=h1Offset)
+plotshape(tsiCrossUnderH1 and tsi_value[1]>=tsi1HTreshould , style=shape.triangledown,color=color.red,location=location.abovebar,offset=h1Offset)
+
+tsiCrossOverH4= ta.crossover(tsiH4_value,tsiH4_signal)
+tsiCrossUnderH4= ta.crossunder(tsiH4_value,tsiH4_signal)
+if((tsiCrossOverH4 and tsi_value[1]<=(-1*tsi4HTreshould)) or (tsiCrossUnderH4 and tsi_value[1]>=tsi4HTreshould))
+    line.new(bar_index+h4Offset, close, bar_index+h4Offset, close * 1.01, extend = extend.both,color=color.black)
+plotshape(tsiCrossOverH4 and tsi_value[1]<=(-1*tsi4HTreshould) , style=shape.arrowup,color=color.green,location=location.belowbar,offset=h4Offset)
+plotshape(tsiCrossUnderH4 and tsi_value[1]>=tsi4HTreshould , style=shape.arrowdown,color=color.red,location=location.abovebar,offset=h4Offset)
+//plotshape(tsiCrossOver, style=shape.triangleup,color=color.green)
+//plotshape(tsiCrossUnder, style=shape.triangledown,color=color.red)
+
+
+//source = close
+//length = input.int(20, minval=1)
+//mult = input.float(2.0, minval=0.001, maxval=50)
+//basis = ta.sma(source, length)
+//dev = mult * ta.stdev(source, length)
+//upper = basis + dev
+//lower = basis - dev
+//bbCrossOver = ta.crossover(source, lower)
+//bbCrossUnder = ta.crossunder(source, upper)
+
+
+//if(tsiCrossOver and tsi_value>=30 and supertrendDirection<0)
+//else if(tsiCrossUnder and tsi_value<=30 and supertrendDirection>0)
+
+//Plots
+//displayHeikenAshi=(showHeikenAshi ? display.all : display.none)
+//plotcandle(ha_open, ha_high, ha_low, ha_close, color=ha_palette)
+
+
+bodyMiddle = plot((ha_open + ha_close) / 2, display=display.none)
+upTrend = plot(supertrendDirection < 0 ? supertrend : na, 'Up Trend', color=color.new(color.green, 0), style=plot.style_linebr)
+downTrend = plot(supertrendDirection < 0 ? na : supertrend, 'Down Trend', color=color.new(color.red, 0), style=plot.style_linebr)
+fill(bodyMiddle, upTrend, color.new(color.green, 90), fillgaps=false)
+fill(bodyMiddle, downTrend, color.new(color.red, 90), fillgaps=false)
